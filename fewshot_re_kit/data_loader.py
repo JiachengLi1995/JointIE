@@ -4,301 +4,272 @@ import os
 import numpy as np
 import random
 import json
+import warnings
 
-class FewRelDataset(data.Dataset):
+class MissingDict(dict):
     """
-    FewRel Dataset
+    If key isn't there, returns default value. Like defaultdict, but it doesn't store the missing
+    keys that were queried.
     """
-    def __init__(self, name, encoder, N, K, Q, na_rate, root):
-        self.root = root
-        path = os.path.join(root, name + ".json")
-        if not os.path.exists(path):
-            print("[ERROR] Data file does not exist!")
-            assert(0)
-        self.json_data = json.load(open(path))
-        self.classes = list(self.json_data.keys())
-        self.N = N
-        self.K = K
-        self.Q = Q
-        self.na_rate = na_rate
+    def __init__(self, missing_val, generator=None) -> None:
+        if generator:
+            super().__init__(generator)
+        else:
+            super().__init__()
+        self._missing_val = missing_val
+
+    def __missing__(self, key):
+        return self._missing_val
+
+def format_label_fields(ner, relations, sentence_start):
+    
+    ss = sentence_start
+    # NER
+    ner_dict = MissingDict("",
+        (
+            ((span_start-ss, span_end-ss), named_entity)
+            for (span_start, span_end, named_entity) in ner
+        )
+    )
+
+    # Relations
+    relation_dict = MissingDict("",
+        (
+            ((  (span1_start-ss, span1_end-ss),  (span2_start-ss, span2_end-ss)   ), relation)
+            for (span1_start, span1_end, span2_start, span2_end, relation) in relations
+        )
+    )
+
+    return ner_dict, relation_dict
+
+
+class DataLoader(data.Dataset):
+    """
+    Load data from json files, preprocess and prepare batches.
+    """
+    def __init__(self, root, filename, encoder, batch_size, ner_label, re_label, max_span_width=5, context_width=1):
+        self.batch_size = batch_size
+        self.max_span_width = max_span_width
+        
+        self.ner_label = ner_label
+        self.re_label = re_label
+
+        assert (context_width % 2 == 1) and (context_width > 0)
+        self.k = int( (context_width - 1) / 2)
         self.encoder = encoder
+        self.lower = 'uncased' in encoder.encoder_type
 
-    def __getraw__(self, item):
-        word, pos1, pos2, mask = self.encoder.tokenize(item['tokens'],
-            item['h'][2][0],
-            item['t'][2][0])
-        return word, pos1, pos2, mask 
+        path = os.path.join(root, filename + ".json")
 
-    def __additem__(self, d, word, pos1, pos2, mask):
-        d['word'].append(word)
-        d['pos1'].append(pos1)
-        d['pos2'].append(pos2)
-        d['mask'].append(mask)
+        data = []
+        with open(path, "r") as f:
+            lines = f.readlines()
+            for line in lines:
+                data.append(json.loads(line))
+        
+        print(f'Begin processing {filename} dataset...')
+        self.data = self.preprocess(data)
+        print(f'Done. {filename} dataset has {len(self.data)} instances.')
+
+
+    def preprocess(self, data):
+        """ Preprocess the data and convert to ids. """
+        processed = []
+        for line in data:
+            sentence_start = 0
+            
+            n_sentences = len(line["sentences"])
+            # TODO(Ulme) Make it so that the
+            line["sentence_groups"] = [[self._normalize_word(word) for sentence in line["sentences"][max(0, i-self.k):min(n_sentences, i + self.k + 1)] for word in sentence] for i in range(n_sentences)]
+            line["sentence_start_index"] = [sum(len(line["sentences"][i-j-1]) for j in range(min(self.k, i))) if i > 0 else 0 for i in range(n_sentences)]
+            line["sentence_end_index"] = [line["sentence_start_index"][i] + len(line["sentences"][i]) for i in range(n_sentences)]
+            for sentence_group_nr in range(len(line["sentence_groups"])):
+                if len(line["sentence_groups"][sentence_group_nr]) > 300:
+                    line["sentence_groups"][sentence_group_nr] = line["sentences"][sentence_group_nr]
+                    line["sentence_start_index"][sentence_group_nr] = 0
+                    line["sentence_end_index"][sentence_group_nr] = len(line["sentences"][sentence_group_nr])
+                    if len(line["sentence_groups"][sentence_group_nr])>300:
+                        warnings.warn("Sentence with > 300 words; BERT may truncate.")
+            
+            zipped = zip(line["sentences"], line["ner"], line["relations"], line["sentence_groups"], line["sentence_start_index"], line["sentence_end_index"])
+
+            for sentence_num, (sentence, ner, relations, groups, start_ix, end_ix) in enumerate(zipped):
+
+                ner_dict, relation_dict = format_label_fields(ner, relations, sentence_start)
+                sentence_start += len(sentence)
+                sentence, spans, ner_labels, span_ner_labels, relation_indices, relation_labels = self.text_to_instance(sentence, ner_dict, relation_dict, sentence_num, groups, start_ix, end_ix, ner, relations)
+                ##filter out sentences with only one entity.
+                if len(span_ner_labels)<=1:
+                    continue
+                processed.append([sentence, spans, ner_labels, relation_indices, relation_labels])
+
+        return processed
+
+    def _normalize_word(self, word):
+
+        if self.lower:
+            word = word.lower()
+        
+        if word == "/." or word == "/?":
+            return word[1:]
+        else:
+            return word
+
+    def text_to_instance(self,
+                        sentence,
+                        ner_dict,
+                        relation_dict,
+                        sentence_num,
+                        groups,
+                        start_ix,
+                        end_ix,
+                        ner,
+                        relations
+                        ):
+        
+        sentence = [self._normalize_word(word) for word in sentence]
+
+        spans = []
+        span_ner_labels = set()
+        ner_labels = []
+        for start, end in self.enumerate_spans(sentence, max_span_width=self.max_span_width):
+            span_ix = (start, end)
+            spans.append((start, end))
+            ner_label = ner_dict[span_ix]
+            ner_labels.append(self.ner_label.get_id(ner_label))
+            if ner_label:
+                span_ner_labels.add(span_ix)
+            
+        n_spans = len(spans)
+        candidate_indices = [(i, j) for i in range(n_spans) for j in range(n_spans) if i!=j]
+
+        
+        relation_indices = []
+        relation_labels = []
+        for i, j in candidate_indices:
+            if spans[i] in span_ner_labels and spans[j] in span_ner_labels:
+                span_pair = (spans[i], spans[j])
+                relation_label = relation_dict[span_pair]
+                
+                relation_indices.append((i, j))
+                relation_labels.append(self.re_label.get_id(relation_label))
+        
+        # Add negative re label
+        self.re_label.get_id("")
+
+        return sentence, spans, ner_labels, span_ner_labels, relation_indices, relation_labels
+
+
+    def enumerate_spans(self, sentence, max_span_width, min_span_width=1):
+
+        max_span_width = max_span_width or len(sentence)
+        spans = []
+
+        for start_index in range(len(sentence)):
+            last_end_index = min(start_index + max_span_width, len(sentence))
+            first_end_index = min(start_index + min_span_width - 1, len(sentence))
+            for end_index in range(first_end_index, last_end_index):
+                start = start_index
+                end = end_index
+                spans.append((start, end))
+        return spans
+
+
+    def __len__(self):
+        return len(self.data)
 
     def __getitem__(self, index):
-        target_classes = random.sample(self.classes, self.N)
-        support_set = {'word': [], 'pos1': [], 'pos2': [], 'mask': [] }
-        query_set = {'word': [], 'pos1': [], 'pos2': [], 'mask': [] }
-        query_label = []
-        Q_na = int(self.na_rate * self.Q)
-        na_classes = list(filter(lambda x: x not in target_classes,  
-            self.classes))
+        
+        sentence, spans, ner_labels, relation_indices, relation_labels = self.data[index]
+        
+        tokens, idx_dict = self.encoder.tokenize(sentence)
+        
+        converted_spans = []
+        for span in spans:
+            converted_spans.append(self.convert_span(span, idx_dict))
+        
+        
+        return [tokens, converted_spans, ner_labels, relation_indices, relation_labels]
 
-        for i, class_name in enumerate(target_classes):
-            indices = np.random.choice(
-                    list(range(len(self.json_data[class_name]))), 
-                    self.K + self.Q, False)
-            count = 0
-            for j in indices:
-                word, pos1, pos2, mask = self.__getraw__(
-                        self.json_data[class_name][j])
-                word = torch.tensor(word).long()
-                pos1 = torch.tensor(pos1).long()
-                pos2 = torch.tensor(pos2).long()
-                mask = torch.tensor(mask).long()
-                if count < self.K:
-                    self.__additem__(support_set, word, pos1, pos2, mask)
-                else:
-                    self.__additem__(query_set, word, pos1, pos2, mask)
-                count += 1
-
-            query_label += [i] * self.Q
-
-        # NA
-        for j in range(Q_na):
-            cur_class = np.random.choice(na_classes, 1, False)[0]
-            index = np.random.choice(
-                    list(range(len(self.json_data[cur_class]))),
-                    1, False)[0]
-            word, pos1, pos2, mask = self.__getraw__(
-                    self.json_data[cur_class][index])
-            word = torch.tensor(word).long()
-            pos1 = torch.tensor(pos1).long()
-            pos2 = torch.tensor(pos2).long()
-            mask = torch.tensor(mask).long()
-            self.__additem__(query_set, word, pos1, pos2, mask)
-        query_label += [self.N] * Q_na
-
-        return support_set, query_set, query_label
     
-    def __len__(self):
-        return 1000000000
+    def convert_span(self, span, idx_dict):
 
-def collate_fn(data):
-    batch_support = {'word': [], 'pos1': [], 'pos2': [], 'mask': []}
-    batch_query = {'word': [], 'pos1': [], 'pos2': [], 'mask': []}
-    batch_label = []
-    support_sets, query_sets, query_labels = zip(*data)
-    for i in range(len(support_sets)):
-        for k in support_sets[i]:
-            batch_support[k] += support_sets[i][k]
-        for k in query_sets[i]:
-            batch_query[k] += query_sets[i][k]
-        batch_label += query_labels[i]
-    for k in batch_support:
-        batch_support[k] = torch.stack(batch_support[k], 0)
-    for k in batch_query:
-        batch_query[k] = torch.stack(batch_query[k], 0)
-    batch_label = torch.tensor(batch_label)
-    return batch_support, batch_query, batch_label
+        start_idx = span[0]
+        end_idx = span[1]
+        
+        span_idx = idx_dict[start_idx] + idx_dict[end_idx]
 
-def get_loader(name, encoder, N, K, Q, batch_size, 
-        num_workers=8, collate_fn=collate_fn, na_rate=0, root='./data'):
-    dataset = FewRelDataset(name, encoder, N, K, Q, na_rate, root)
+        return (min(span_idx), max(span_idx))
+
+    def collate_fn(self, data):
+        tokens_b, converted_spans_b, ner_labels_b, relation_indices_b, relation_labels_b = zip(*data)
+
+        max_length = max([len(tokens) for tokens in tokens_b])
+        ##padding
+        for tokens in tokens_b:
+            while len(tokens)<max_length:
+                tokens.append(0)
+        
+        tokens_b = torch.LongTensor(tokens_b)
+        ##mask
+        mask = tokens_b.eq(0).eq(0).float()
+
+
+        span_max_length = max([len(converted_spans) for converted_spans in converted_spans_b])
+        ##span padding
+        for converted_spans in converted_spans_b:
+            while len(converted_spans)<span_max_length:
+                converted_spans.append((0, 0))
+        
+        converted_spans_b = torch.LongTensor(converted_spans_b)
+        ## span label padding
+        for ner_labels in ner_labels_b:
+            while len(ner_labels)<span_max_length:
+                ner_labels.append(0)
+
+        ner_labels_b = torch.LongTensor(ner_labels_b)
+        ##span mask
+        span_mask = converted_spans_b[:,:,0].eq(0).eq(0).float()
+
+        
+
+        ##relation padding
+        relation_max_length = max([len(relation_indices) for relation_indices in relation_indices_b])
+        for relation_indices in relation_indices_b:
+            while len(relation_indices)<relation_max_length:
+                relation_indices.append((0, 0))
+
+        relation_indices_b = torch.LongTensor(relation_indices_b)
+
+        ## relation label padding
+        for relation_labels in relation_labels_b:
+            while len(relation_labels)<relation_max_length:
+                relation_labels.append(0)
+
+        relation_labels_b = torch.LongTensor(relation_labels_b)
+
+        ##relation mask (both indix are 0, then should be masked)
+        relation_mask = torch.logical_and(relation_indices_b[:,:,0].eq(0), relation_indices_b[:,:,1].eq(0)).eq(0).float()
+
+        if torch.cuda.is_available():
+            tokens_b = tokens_b.cuda()  # (batch_size, length)
+            mask = mask.cuda()          # (batch_size, length)
+            converted_spans_b = converted_spans_b.cuda() # (batch_size, span_num, 2)
+            span_mask = span_mask.cuda()                 # (batch_size, span_num)
+            ner_labels_b = ner_labels_b.cuda()           # (batch_size, span_num)
+            relation_indices_b = relation_indices_b.cuda() # (batch_size, span_pair_num, 2)
+            relation_mask = relation_mask.cuda()           # (batch_size, span_pair_num)
+            relation_labels_b = relation_labels_b.cuda()   # (batch_size, span_pair_num)
+
+        return tokens_b, mask, converted_spans_b, span_mask, ner_labels_b, relation_indices_b, relation_mask, relation_labels_b
+
+def get_loader(root, filename, encoder, batch_size, ner_label, re_label, max_span_width=5, context_width=1):
+
+    dataset = DataLoader(root, filename, encoder, batch_size, ner_label, re_label, max_span_width=5, context_width=1)
     data_loader = data.DataLoader(dataset=dataset,
             batch_size=batch_size,
-            shuffle=False,
+            shuffle=True,
             pin_memory=True,
-            num_workers=num_workers,
-            collate_fn=collate_fn)
+            num_workers=4,
+            collate_fn=dataset.collate_fn)
     return iter(data_loader)
-
-class FewRelDatasetPair(data.Dataset):
-    """
-    FewRel Pair Dataset
-    """
-    def __init__(self, name, encoder, N, K, Q, na_rate, root, encoder_name):
-        self.root = root
-        path = os.path.join(root, name + ".json")
-        if not os.path.exists(path):
-            print("[ERROR] Data file does not exist!")
-            assert(0)
-        self.json_data = json.load(open(path))
-        self.classes = list(self.json_data.keys())
-        self.N = N
-        self.K = K
-        self.Q = Q
-        self.na_rate = na_rate
-        self.encoder = encoder
-        self.encoder_name = encoder_name
-        self.max_length = encoder.max_length
-
-    def __getraw__(self, item):
-        word = self.encoder.tokenize(item['tokens'],
-            item['h'][2][0],
-            item['t'][2][0])
-        return word 
-
-    def __additem__(self, d, word, pos1, pos2, mask):
-        d['word'].append(word)
-        d['pos1'].append(pos1)
-        d['pos2'].append(pos2)
-        d['mask'].append(mask)
-
-    def __getitem__(self, index):
-        target_classes = random.sample(self.classes, self.N)
-        support = []
-        query = []
-        fusion_set = {'word': [], 'mask': [], 'seg': []}
-        query_label = []
-        Q_na = int(self.na_rate * self.Q)
-        na_classes = list(filter(lambda x: x not in target_classes,  
-            self.classes))
-
-        for i, class_name in enumerate(target_classes):
-            indices = np.random.choice(
-                    list(range(len(self.json_data[class_name]))), 
-                    self.K + self.Q, False)
-            count = 0
-            for j in indices:
-                word  = self.__getraw__(
-                        self.json_data[class_name][j])
-                if count < self.K:
-                    support.append(word)
-                else:
-                    query.append(word)
-                count += 1
-
-            query_label += [i] * self.Q
-
-        # NA
-        for j in range(Q_na):
-            cur_class = np.random.choice(na_classes, 1, False)[0]
-            index = np.random.choice(
-                    list(range(len(self.json_data[cur_class]))),
-                    1, False)[0]
-            word = self.__getraw__(
-                    self.json_data[cur_class][index])
-            query.append(word)
-        query_label += [self.N] * Q_na
-
-        for word_query in query:
-            for word_support in support:
-                if self.encoder_name == 'bert':
-                    SEP = self.encoder.tokenizer.convert_tokens_to_ids(['[SEP]'])
-                    CLS = self.encoder.tokenizer.convert_tokens_to_ids(['[CLS]'])
-                    word_tensor = torch.zeros((self.max_length)).long()
-                else:
-                    SEP = self.encoder.tokenizer.convert_tokens_to_ids(['</s>'])     
-                    CLS = self.encoder.tokenizer.convert_tokens_to_ids(['<s>'])
-                    word_tensor = torch.ones((self.max_length)).long()
-                new_word = CLS + word_support + SEP + word_query + SEP
-                for i in range(min(self.max_length, len(new_word))):
-                    word_tensor[i] = new_word[i]
-                mask_tensor = torch.zeros((self.max_length)).long()
-                mask_tensor[:min(self.max_length, len(new_word))] = 1
-                seg_tensor = torch.ones((self.max_length)).long()
-                seg_tensor[:min(self.max_length, len(word_support) + 1)] = 0
-                fusion_set['word'].append(word_tensor)
-                fusion_set['mask'].append(mask_tensor)
-                fusion_set['seg'].append(seg_tensor)
-
-        return fusion_set, query_label
-    
-    def __len__(self):
-        return 1000000000
-
-def collate_fn_pair(data):
-    batch_set = {'word': [], 'seg': [], 'mask': []}
-    batch_label = []
-    fusion_sets, query_labels = zip(*data)
-    for i in range(len(fusion_sets)):
-        for k in fusion_sets[i]:
-            batch_set[k] += fusion_sets[i][k]
-        batch_label += query_labels[i]
-    for k in batch_set:
-        batch_set[k] = torch.stack(batch_set[k], 0)
-    batch_label = torch.tensor(batch_label)
-    return batch_set, batch_label
-
-def get_loader_pair(name, encoder, N, K, Q, batch_size, 
-        num_workers=8, collate_fn=collate_fn_pair, na_rate=0, root='./data', encoder_name='bert'):
-    dataset = FewRelDatasetPair(name, encoder, N, K, Q, na_rate, root, encoder_name)
-    data_loader = data.DataLoader(dataset=dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            pin_memory=True,
-            num_workers=num_workers,
-            collate_fn=collate_fn)
-    return iter(data_loader)
-
-class FewRelUnsupervisedDataset(data.Dataset):
-    """
-    FewRel Unsupervised Dataset
-    """
-    def __init__(self, name, encoder, N, K, Q, na_rate, root):
-        self.root = root
-        path = os.path.join(root, name + ".json")
-        if not os.path.exists(path):
-            print("[ERROR] Data file does not exist!")
-            assert(0)
-        self.json_data = json.load(open(path))
-        self.N = N
-        self.K = K
-        self.Q = Q
-        self.na_rate = na_rate
-        self.encoder = encoder
-
-    def __getraw__(self, item):
-        word, pos1, pos2, mask = self.encoder.tokenize(item['tokens'],
-            item['h'][2][0],
-            item['t'][2][0])
-        return word, pos1, pos2, mask 
-
-    def __additem__(self, d, word, pos1, pos2, mask):
-        d['word'].append(word)
-        d['pos1'].append(pos1)
-        d['pos2'].append(pos2)
-        d['mask'].append(mask)
-
-    def __getitem__(self, index):
-        total = self.N * self.K
-        support_set = {'word': [], 'pos1': [], 'pos2': [], 'mask': [] }
-
-        indices = np.random.choice(list(range(len(self.json_data))), total, False)
-        for j in indices:
-            word, pos1, pos2, mask = self.__getraw__(
-                    self.json_data[j])
-            word = torch.tensor(word).long()
-            pos1 = torch.tensor(pos1).long()
-            pos2 = torch.tensor(pos2).long()
-            mask = torch.tensor(mask).long()
-            self.__additem__(support_set, word, pos1, pos2, mask)
-
-        return support_set
-    
-    def __len__(self):
-        return 1000000000
-
-def collate_fn_unsupervised(data):
-    batch_support = {'word': [], 'pos1': [], 'pos2': [], 'mask': []}
-    support_sets = data
-    for i in range(len(support_sets)):
-        for k in support_sets[i]:
-            batch_support[k] += support_sets[i][k]
-    for k in batch_support:
-        batch_support[k] = torch.stack(batch_support[k], 0)
-    return batch_support
-
-def get_loader_unsupervised(name, encoder, N, K, Q, batch_size, 
-        num_workers=8, collate_fn=collate_fn_unsupervised, na_rate=0, root='./data'):
-    dataset = FewRelUnsupervisedDataset(name, encoder, N, K, Q, na_rate, root)
-    data_loader = data.DataLoader(dataset=dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            pin_memory=True,
-            num_workers=num_workers,
-            collate_fn=collate_fn)
-    return iter(data_loader)
-
-

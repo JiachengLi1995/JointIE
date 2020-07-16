@@ -6,7 +6,7 @@ from torch import autograd, optim, nn
 from torch.autograd import Variable
 from torch.nn import functional as F
 
-class Proto(fewshot_re_kit.framework.FewShotREModel):
+class Proto(fewshot_re_kit.framework.IEModel):
     
     def __init__(self, sentence_encoder, dot=False):
         fewshot_re_kit.framework.FewShotREModel.__init__(self, sentence_encoder)
