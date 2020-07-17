@@ -206,6 +206,40 @@ class SelfAttentiveSpanExtractor(torch.nn.Module):
 
         return attended_text_embeddings
 
+class FeedForward(nn.Module):
+    def __init__(self,
+                input_dim,
+                num_layers,
+                hidden_dim,
+                dropout = 0.3):
+        super().__init__()
+        
+        hidden_dims = [hidden_dim] * num_layers
+        dropouts = [dropout] * num_layers
+        input_dims = [input_dim] + hidden_dims[:-1]
+        output_dim = hidden_dims[-1]
+
+        linear_layers = []
+        for layer_input_dim, layer_output_dim in zip(input_dims, hidden_dims):
+            linear_layers.append(nn.Linear(layer_input_dim, layer_output_dim))
+        self._linear_layers = nn.ModuleList(linear_layers)
+
+        self._activations = nn.ModuleList([nn.ReLU()] * num_layers)
+
+        dropout_layers = [nn.Dropout(p=value) if value>0 else lambda x: x for value in dropouts ]
+        self._dropout = nn.ModuleList(dropout_layers)
+    
+    def forward(self, inputs):
+
+        output = inputs
+        for layer, activation, dropout in zip(
+            self._linear_layers, self._activations, self._dropout
+        ):
+            output = dropout(activation(layer(output)))
+
+        return output
+
+
 class TimeDistributed(torch.nn.Module):
     """
     Given an input shaped like `(batch_size, time_steps, [rest])` and a `Module` that takes

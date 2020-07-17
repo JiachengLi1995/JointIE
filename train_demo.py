@@ -124,7 +124,7 @@ def main():
     if model_name == 'Proto':
         model = Proto(sentence_encoder, dot=opt.dot)
     elif model_name == 'JointIE':
-        model = JointIE(sentence_encoder, opt.hidden_size, opt.embedding_size, opt.context_layer, opt.context_dropout)
+        model = JointIE(sentence_encoder, opt.hidden_size, opt.embedding_size, ner_label, re_label, opt.context_layer, opt.context_dropout)
     else:
         raise NotImplementedError
     
