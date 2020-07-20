@@ -5,6 +5,8 @@ import numpy as np
 import math
 from models.modules import EndpointSpanExtractor, SelfAttentiveSpanExtractor, FeedForward, \
                         flatten_and_batch_shift_indices, batched_index_select, SpanPairPairedLayer
+from fewshot_re_kit.categorical_accuracy import MyCategoricalAccuracy
+from fewshot_re_kit.precision_recall_f1 import PrecisionRecallF1
 from collections import defaultdict
 from copy import deepcopy
 import fewshot_re_kit
@@ -22,7 +24,7 @@ class JointIE(fewshot_re_kit.framework.IEModel):
                 max_span_width = 5,
                 span_width_embedding_dim = 64,
                 spans_per_word = 0.6,
-                e2e = False
+                e2e = True
                 ):
         super().__init__(self, sentence_encoder)
         self.encoder = sentence_encoder
@@ -54,6 +56,19 @@ class JointIE(fewshot_re_kit.framework.IEModel):
         repr_layer = FeedForward(512 * 3 + 64, num_layers = 2, hidden_dim = hidden_size)
         self.span_pair_layer = SpanPairPairedLayer(dim_reduce_layer, repr_layer)
         self.span_pair_proj_label = nn.Linear(hidden_size, re_label_num)
+
+        ## metrics
+        # ner
+        self.ner_acc = MyCategoricalAccuracy(top_k=1, tie_break=False)
+        self.ner_prf = PrecisionRecallF1(neg_label=self.ner_neg_id)
+        self.ner_prf_b = PrecisionRecallF1(neg_label=self.ner_neg_id, binary_match=True)
+
+        # relation
+
+        self.re_acc = MyCategoricalAccuracy(top_k=1, tie_break=False)
+        self.re_prf = PrecisionRecallF1(neg_label=self.re_neg_id)
+        self.re_prf_b = PrecisionRecallF1(neg_label=self.re_neg_id, binary_match=True)
+
 
                                                                     
     def forward(self, 
@@ -101,6 +116,13 @@ class JointIE(fewshot_re_kit.framework.IEModel):
                     average='sum')
 
         span_len = converted_spans[:, :, 1] - converted_spans[:, :, 0] + 1
+
+        ## span metrics
+        self.ner_acc(span_logits, ner_labels, span_mask_subset)
+        self.ner_prf(span_logits.max(-1)[1], ner_labels, span_mask_subset.long(), bucket_value=span_len)
+        self.ner_prf_b(span_logits.max(-1)[1], ner_labels, span_mask_subset.long())
+
+        
         # span pair (relation)
 
         if not self.e2e:
@@ -200,9 +222,25 @@ class JointIE(fewshot_re_kit.framework.IEModel):
         span_pair_loss = sequence_cross_entropy_with_logits(
                         span_pair_logits, span_pair_labels, span_pair_mask_for_loss,
                         average='sum')
-                    
+
+        ## relation metrics
+
+        self.re_acc(span_pair_logits, span_pair_labels, span_pair_mask)
+        if not self.e2e:
+            recall = None
+        else:
+            recall = ref_span_pair_labels.ne(self.re_neg_id)
+            recall = (recall.float() * ref_span_pair_mask).long()    
+
+        self.re_prf(span_pair_pred, span_pair_labels, span_pair_mask.long(), recall=recall, bucket_value=span_pair_len)
+        self.re_prf_b(span_pair_pred, span_pair_labels, span_pair_mask.long(), recall=recall)
+
+        ## loss
         loss = span_loss + span_pair_loss
 
+        ## output dict
+
+        
 
         return loss
 
