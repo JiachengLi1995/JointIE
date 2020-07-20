@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.nn.parameter import Parameter
 import math
 from typing import List
+import copy
 
 
 class EndpointSpanExtractor(torch.nn.Module):
@@ -217,7 +218,8 @@ class FeedForward(nn.Module):
         hidden_dims = [hidden_dim] * num_layers
         dropouts = [dropout] * num_layers
         input_dims = [input_dim] + hidden_dims[:-1]
-        output_dim = hidden_dims[-1]
+        self.output_dim = hidden_dims[-1]
+        self.input_dim = input_dim
 
         linear_layers = []
         for layer_input_dim, layer_output_dim in zip(input_dims, hidden_dims):
@@ -229,6 +231,12 @@ class FeedForward(nn.Module):
         dropout_layers = [nn.Dropout(p=value) if value>0 else lambda x: x for value in dropouts ]
         self._dropout = nn.ModuleList(dropout_layers)
     
+    def get_output_dim(self):
+        return self.output_dim
+
+    def get_input_dim(self):
+        return self.input_dim
+    
     def forward(self, inputs):
 
         output = inputs
@@ -239,6 +247,99 @@ class FeedForward(nn.Module):
 
         return output
 
+class SpanPairPairedLayer(nn.Module):
+    ''' Represent span pairs '''
+    def __init__(self,
+                 dim_reduce_layer,
+                 repr_layer,
+                 separate = True,
+                 pair = True,
+                 combine = 'coref',
+                 dist_emb_size = 64) -> None:
+        super(SpanPairPairedLayer, self).__init__()
+
+        self.inp_dim, self.out_dim = None, None
+        self.pair = pair
+        self.combine = combine
+        assert combine in {'concat', 'coref'}  # 'coref' means using concat + dot + width
+        if combine == 'coref':
+            self.num_distance_buckets = 10
+            self.distance_embedding = nn.Embedding(self.num_distance_buckets, dist_emb_size)
+
+        self.dim_reduce_layer1 = self.dim_reduce_layer2 = dim_reduce_layer
+        if dim_reduce_layer is not None:
+            self.inp_dim = self.inp_dim or dim_reduce_layer.get_input_dim()
+            self.out_dim = dim_reduce_layer.get_output_dim()
+            self.dim_reduce_layer1 = TimeDistributed(dim_reduce_layer)
+            if separate:
+                self.dim_reduce_layer2 = copy.deepcopy(self.dim_reduce_layer1)
+            else:
+                self.dim_reduce_layer2 = self.dim_reduce_layer1
+            if pair:
+                self.out_dim *= 2
+
+        self.repr_layer = None
+        if repr_layer is not None:
+            if not pair:
+                raise Exception('MLP needs paired input')
+            self.inp_dim = self.inp_dim or repr_layer.get_input_dim()
+            self.out_dim = repr_layer.get_output_dim()
+            self.repr_layer = TimeDistributed(repr_layer)
+
+
+    def get_output_dim(self):
+        return self.out_dim
+
+
+    def get_input_dim(self):
+        return self.inp_dim
+
+
+    def forward(self,
+                span: torch.Tensor,  # SHAPE: (batch_size, num_spans, span_dim)
+                span_pairs: torch.LongTensor  # SHAPE: (batch_size, num_span_pairs, 2)
+                ):
+        span1 = span2 = span
+        if self.dim_reduce_layer1 is not None:
+            span1 = self.dim_reduce_layer1(span)
+        if self.dim_reduce_layer2 is not None:
+            span2 = self.dim_reduce_layer2(span)
+
+        if not self.pair:
+            return span1, span2
+
+        num_spans = span.size(1)
+
+        # get span pair embedding
+        span_pairs_p = span_pairs[:, :, 0]
+        span_pairs_c = span_pairs[:, :, 1]
+        # SHAPE: (batch_size * num_span_pairs)
+        flat_span_pairs_p = flatten_and_batch_shift_indices(span_pairs_p, num_spans)
+        flat_span_pairs_c = flatten_and_batch_shift_indices(span_pairs_c, num_spans)
+        # SHAPE: (batch_size, num_span_pairs, span_dim)
+        span_pair_p_emb = batched_index_select(span1, span_pairs_p, flat_span_pairs_p)
+        span_pair_c_emb = batched_index_select(span2, span_pairs_c, flat_span_pairs_c)
+        if self.combine == 'concat':
+            # SHAPE: (batch_size, num_span_pairs, span_dim * 2)
+            span_pair_emb = torch.cat([span_pair_p_emb, span_pair_c_emb], -1)
+        elif self.combine == 'coref':
+            # use the indices gap as distance, which requires the indices to be consistent
+            # with the order they appear in the sentences
+            distance = span_pairs_p - span_pairs_c
+            # SHAPE: (batch_size, num_span_pairs, dist_emb_dim)
+            distance_embeddings = self.distance_embedding(
+                bucket_values(distance, num_total_buckets=self.num_distance_buckets))
+            # SHAPE: (batch_size, num_span_pairs, span_dim * 3)
+            span_pair_emb = torch.cat([span_pair_p_emb,
+                                       span_pair_c_emb,
+                                       span_pair_p_emb * span_pair_c_emb,
+                                       distance_embeddings], -1)
+
+        if self.repr_layer is not None:
+            # SHAPE: (batch_size, num_span_pairs, out_dim)
+            span_pair_emb = self.repr_layer(span_pair_emb)
+
+        return span_pair_emb
 
 class TimeDistributed(torch.nn.Module):
     """
