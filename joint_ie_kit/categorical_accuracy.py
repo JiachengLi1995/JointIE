@@ -27,7 +27,7 @@ class CategoricalAccuracy:
         self,
         predictions: torch.Tensor,
         gold_labels: torch.Tensor,
-        mask: Optional[torch.BoolTensor] = None,
+        mask = None,
     ):
         """
         # Parameters
@@ -104,6 +104,15 @@ class CategoricalAccuracy:
     def reset(self):
         self.correct_count = 0.0
         self.total_count = 0.0
+
+    def detach_tensors(self, *tensors):
+        """
+        If you actually passed gradient-tracking Tensors to a Metric, there will be
+        a huge memory leak, because it will prevent garbage collection for the computation
+        graph. This method ensures the tensors are detached.
+        """
+        # Check if it's actually a tensor in case something else was passed.
+        return (x.detach() if isinstance(x, torch.Tensor) else x for x in tensors)
 
 class MyCategoricalAccuracy(CategoricalAccuracy):
     ''' Wrapper of AllenNLP's CategoricalAccuracy with an additional used field '''

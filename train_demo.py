@@ -38,7 +38,7 @@ def main():
             help='Embedding dimension')
     
     ## model
-    parser.add_argument('--model', default='semiIE',
+    parser.add_argument('--model', default='JointIE',
             help='model name')
     parser.add_argument('--encoder', default='bert',
             help='encoder: cnn or bert or roberta')

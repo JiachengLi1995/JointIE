@@ -125,3 +125,12 @@ class PrecisionRecallF1:
         self._f1 = 0
         self._num_sample = 0
         self._used = False
+
+    def detach_tensors(self, *tensors):
+        """
+        If you actually passed gradient-tracking Tensors to a Metric, there will be
+        a huge memory leak, because it will prevent garbage collection for the computation
+        graph. This method ensures the tensors are detached.
+        """
+        # Check if it's actually a tensor in case something else was passed.
+        return (x.detach() if isinstance(x, torch.Tensor) else x for x in tensors)

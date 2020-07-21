@@ -83,8 +83,6 @@ class IEFramework:
                     if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
                 ]
             optimizer = AdamW(parameters_to_optimize, lr=2e-5, correct_bias=False)
-            if self.adv:
-                optimizer_encoder = AdamW(parameters_to_optimize, lr=1e-5, correct_bias=False)
             scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_step, num_training_steps=train_iter) 
         else:
             optimizer = pytorch_optim(model.parameters(),
@@ -137,13 +135,13 @@ class IEFramework:
             relation_prf_b = relation_results[2].get_metric()
          
             
-            sys.stdout.write('step: {0:4} | loss: {1:2.6f},  NER_acc: {2:3.2f},  RE_acc: {3:3.2f}%'.format(it + 1, loss, 100 * ner_acc, 100 * relation_acc) +'\r')
-            sys.stdout.write('NER \t F1 \t Precision \t Recall %')
-            sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(ner_prf['f'], ner_prf['p'], ner_prf['r']) +'\r')
-            sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(ner_prf_b['f'], ner_prf_b['p'], ner_prf_b['r']) +'\r')
-            sys.stdout.write('Relation \t F1 \t Precision \t Recall %')
-            sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(relation_prf['f'], relation_prf['p'], relation_prf['r']) +'\r')
-            sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(relation_prf_b['f'], relation_prf_b['p'], relation_prf_b['r']) +'\r')
+            sys.stdout.write('step: {0:4} | loss: {1:2.6f},  NER_acc: {2:3.2f}%,  RE_acc: {3:3.2f}%'.format(it + 1, loss, 100 * ner_acc, 100 * relation_acc) +'\n')
+            sys.stdout.write('NER \t F1 \t Precision \t Recall \n')
+            sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} '.format(ner_prf['f'], ner_prf['p'], ner_prf['r']) +'\n')
+            sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(ner_prf_b['f'], ner_prf_b['p'], ner_prf_b['r']) +'\n')
+            sys.stdout.write('Relation \t F1 \t Precision \t Recall \n')
+            sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(relation_prf['f'], relation_prf['p'], relation_prf['r']) +'\n')
+            sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(relation_prf_b['f'], relation_prf_b['p'], relation_prf_b['r']) +'\n')
             sys.stdout.flush()
 
             if (it + 1) % val_step == 0:
@@ -209,13 +207,13 @@ class IEFramework:
                 relation_prf = relation_results[1].get_metric()
                 relation_prf_b = relation_results[2].get_metric()
 
-                sys.stdout.write('step: {0:4} | loss: {1:2.6f},  NER_acc: {2:3.2f},  RE_acc: {3:3.2f}%'.format(it + 1, loss, 100 * ner_acc, 100 * relation_acc) +'\r')
-                sys.stdout.write('NER \t F1 \t Precision \t Recall')
-                sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(ner_prf['f'], ner_prf['p'], ner_prf['r']) +'\r')
-                sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(ner_prf_b['f'], ner_prf_b['p'], ner_prf_b['r']) +'\r')
-                sys.stdout.write('Relation \t F1 \t Precision \t Recall')
-                sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(relation_prf['f'], relation_prf['p'], relation_prf['r']) +'\r')
-                sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(relation_prf_b['f'], relation_prf_b['p'], relation_prf_b['r']) +'\r')
+                sys.stdout.write('step: {0:4} | loss: {1:2.6f},  NER_acc: {2:3.2f}%,  RE_acc: {3:3.2f}%'.format(it + 1, loss, 100 * ner_acc, 100 * relation_acc) +'\n')
+                sys.stdout.write('NER \t F1 \t Precision \t Recall \n')
+                sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} '.format(ner_prf['f'], ner_prf['p'], ner_prf['r']) +'\n')
+                sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(ner_prf_b['f'], ner_prf_b['p'], ner_prf_b['r']) +'\n')
+                sys.stdout.write('Relation \t F1 \t Precision \t Recall \n')
+                sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(relation_prf['f'], relation_prf['p'], relation_prf['r']) +'\n')
+                sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(relation_prf_b['f'], relation_prf_b['p'], relation_prf_b['r']) +'\n')
                 sys.stdout.flush()
                 
             print("")

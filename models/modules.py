@@ -61,12 +61,23 @@ class EndpointSpanExtractor(torch.nn.Module):
         if use_exclusive_start_indices:
             self._start_sentinel = Parameter(torch.randn([1, 1, int(input_dim)]))
 
+        self.span_width_embedding_dim = span_width_embedding_dim
+
         if num_width_embeddings is not None and span_width_embedding_dim is not None:
             self._span_width_embedding = nn.Embedding(
                 num_embeddings=num_width_embeddings, embedding_dim=span_width_embedding_dim
             )
         else:
             self._span_width_embedding = None
+
+    def get_input_dim(self) -> int:
+        return self._input_dim
+
+    def get_output_dim(self) -> int:
+        combined_dim = get_combined_dim(self._combination, [self._input_dim, self._input_dim])
+        if self._span_width_embedding is not None:
+            return combined_dim + self.span_width_embedding_dim
+        return combined_dim
 
     def forward(
         self,
@@ -736,3 +747,37 @@ def weighted_sum(matrix: torch.Tensor, attention: torch.Tensor) -> torch.Tensor:
         matrix = matrix.expand(*expanded_size)
     intermediate = attention.unsqueeze(-1).expand_as(matrix) * matrix
     return intermediate.sum(dim=-2)
+
+def get_combined_dim(combination, tensor_dims):
+    """
+    For use with [`combine_tensors`](./util.md#combine_tensors).
+    This function computes the resultant dimension when calling `combine_tensors(combination, tensors)`,
+    when the tensor dimension is known.  This is necessary for knowing the sizes of weight matrices
+    when building models that use `combine_tensors`.
+    # Parameters
+    combination : `str`
+        A comma-separated list of combination pieces, like `"1,2,1*2"`, specified identically to
+        `combination` in `combine_tensors`.
+    tensor_dims : `List[int]`
+        A list of tensor dimensions, where each dimension is from the `last axis` of the tensors
+        that will be input to `combine_tensors`.
+    """
+    if len(tensor_dims) > 9:
+        raise ConfigurationError("Double-digit tensor lists not currently supported")
+    combination = combination.replace("x", "1").replace("y", "2")
+    return sum(_get_combination_dim(piece, tensor_dims) for piece in combination.split(","))
+
+
+def _get_combination_dim(combination, tensor_dims):
+    if combination.isdigit():
+        index = int(combination) - 1
+        return tensor_dims[index]
+    else:
+        if len(combination) != 3:
+            raise ConfigurationError("Invalid combination: " + combination)
+        first_tensor_dim = _get_combination_dim(combination[0], tensor_dims)
+        second_tensor_dim = _get_combination_dim(combination[2], tensor_dims)
+        operation = combination[1]
+        if first_tensor_dim != second_tensor_dim:
+            raise ConfigurationError('Tensor dims must match for operation "{}"'.format(operation))
+        return first_tensor_dim

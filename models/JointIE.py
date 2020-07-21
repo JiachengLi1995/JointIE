@@ -27,20 +27,20 @@ class JointIE(nn.Module):
                 spans_per_word = 0.6,
                 e2e = True
                 ):
-        super().__init__(self, sentence_encoder)
-        self.encoder = sentence_encoder
-        self.contextual_layer = nn.LSTM(embedding_size, hidden_size, num_layers=context_layer, bidirectional=True, dropout=context_dropout)
+        super().__init__()
+        self.sentence_encoder = sentence_encoder
+        self.contextual_layer = nn.LSTM(embedding_size, embedding_size//2, num_layers=context_layer, bidirectional=True, dropout=context_dropout)
 
-        self.endpoint_span_extractor = EndpointSpanExtractor(hidden_size,
+        self.endpoint_span_extractor = EndpointSpanExtractor(embedding_size,
                                                                 combination=span_repr_combination,
-                                                                num_width_embeddings=max_span_width * 2,
+                                                                num_width_embeddings=max_span_width * 5,
                                                                 span_width_embedding_dim=span_width_embedding_dim,
                                                                 bucket_widths=False)
 
-        self.attentive_span_extractor = SelfAttentiveSpanExtractor(hidden_size)
+        self.attentive_span_extractor = SelfAttentiveSpanExtractor(embedding_size)
 
         ## span predictioin layer
-        span_emb_dim = embedding_size+hidden_size
+        span_emb_dim = self.endpoint_span_extractor.get_output_dim() + self.attentive_span_extractor.get_output_dim()
         ner_label_num = ner_label.get_num()
         self.span_layer = FeedForward(input_dim = span_emb_dim, num_layers=2, hidden_dim=hidden_size, dropout=context_dropout)
         self.span_proj_label = nn.Linear(hidden_size, ner_label_num)
@@ -56,7 +56,7 @@ class JointIE(nn.Module):
         dim_reduce_layer = FeedForward(span_emb_dim, num_layers = 1, hidden_dim = hidden_size)
         repr_layer = FeedForward(hidden_size * 3 + span_width_embedding_dim, num_layers = 2, hidden_dim = hidden_size)
         self.span_pair_layer = SpanPairPairedLayer(dim_reduce_layer, repr_layer)
-        self.span_pair_proj_label = nn.Linear(hidden_size, re_label_num)
+        self.span_pair_label_proj = nn.Linear(hidden_size, re_label_num)
 
         ## metrics
         # ner
@@ -91,8 +91,8 @@ class JointIE(nn.Module):
         # extract span representation
         ep_span_emb = self.endpoint_span_extractor(contextual_embedding, converted_spans, span_mask)  #(batch_size , span_num, hidden_size)
         att_span_emb = self.attentive_span_extractor(embedding, converted_spans, span_mask)   #(batch_size, span_num, bert_dim)
-
-        span_emb = torch.cat([ep_span_emb, att_span_emb] -1)  #(batch_size, span_num, hidden_size+bert_dim)
+    
+        span_emb = torch.cat((ep_span_emb, att_span_emb), dim = -1)  #(batch_size, span_num, hidden_size+bert_dim)
 
         span_logits = self.span_proj_label(self.span_layer(span_emb))  #(batch_size, span_num, span_label_num)
         span_prob = F.softmax(span_logits, dim=-1)  #(batch_size, span_num, span_label_num)
@@ -248,7 +248,7 @@ class JointIE(nn.Module):
             'span_metrics': [self.ner_acc, self.ner_prf, self.ner_prf_b],
             'span_pair_loss': span_pair_loss,
             'span_pair_pred': span_pair_pred,
-            'span_pair_metrics':[self.ner_acc, self.ner_prf, self.ner_prf_b]
+            'span_pair_metrics':[self.re_acc, self.re_prf, self.re_prf_b]
         }
 
         return output_dict
@@ -276,7 +276,7 @@ class JointIE(nn.Module):
     def extenral_to_internal(self,
                              span_ind: torch.LongTensor,  # SHAPE: (batch_size, num_spans)
                              total_num_spans: int,
-                             ) -> Callable:  # SHAPE: (batch_size, total_num_spans)
+                             ):  # SHAPE: (batch_size, total_num_spans)
         batch_size, num_spans = span_ind.size()
         # SHAPE: (batch_size, total_num_spans)
         converter = span_ind.new_zeros((batch_size, total_num_spans))
@@ -295,7 +295,7 @@ class JointIE(nn.Module):
                              start_span_ind: torch.LongTensor = None,  # SHAPE: (batch_size, num_spans2)
                              start_span_ind_mask: torch.FloatTensor = None,  # SHAPE: (batch_size, num_spans2)
                              method: str = None,
-                             absolute: bool = True) -> Tuple[torch.LongTensor, torch.FloatTensor, Tuple]:
+                             absolute: bool = True):
         ''' Create span pair indices and corresponding mask based on selected spans '''
         batch_size, num_spans = span_ind.size()
 
@@ -388,7 +388,7 @@ class JointIE(nn.Module):
                         spans: torch.IntTensor = None,  # SHAPE: (batch_size, num_spans, 2)
                         use_binary: bool = False,
                         span_pair_pred: torch.IntTensor = None  # SHAPE: (batch_size, num_span_pairs1)
-                        ) -> torch.IntTensor: # SHPAE: (batch_size, num_span_pairs1)
+                        ): # SHPAE: (batch_size, num_span_pairs1)
         neg_label_ind = self.re_neg_id
         device = span_pairs.device
         span_pairs = span_pairs.cpu().numpy()
