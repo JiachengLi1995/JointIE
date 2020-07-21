@@ -1,15 +1,15 @@
 import sys
 sys.path.append('..')
-import fewshot_re_kit
+import joint_ie_kit
 import torch
 from torch import autograd, optim, nn
 from torch.autograd import Variable
 from torch.nn import functional as F
 
-class Proto(fewshot_re_kit.framework.IEModel):
+class Proto(joint_ie_kit.framework.IEModel):
     
     def __init__(self, sentence_encoder, dot=False):
-        fewshot_re_kit.framework.FewShotREModel.__init__(self, sentence_encoder)
+        joint_ie_kit.framework.FewShotREModel.__init__(self, sentence_encoder)
         # self.fc = nn.Linear(hidden_size, hidden_size)
         self.drop = nn.Dropout()
         self.dot = dot

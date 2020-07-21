@@ -17,45 +17,6 @@ def warmup_linear(global_step, warmup_step):
     else:
         return 1.0
 
-class IEModel(nn.Module):
-    def __init__(self, sentence_encoder):
-        '''
-        sentence_encoder: Sentence encoder
-        
-        You need to set self.cost as your own loss function.
-        '''
-        nn.Module.__init__(self)
-        self.sentence_encoder = nn.DataParallel(sentence_encoder)
-        self.cost = nn.CrossEntropyLoss()
-    
-    def forward(self, support, query, N, K, Q):
-        '''
-        support: Inputs of the support set.
-        query: Inputs of the query set.
-        N: Num of classes
-        K: Num of instances for each class in the support set
-        Q: Num of instances for each class in the query set
-        return: logits, pred
-        '''
-        raise NotImplementedError
-
-    def loss(self, logits, label):
-        '''
-        logits: Logits with the size (..., class_num)
-        label: Label with whatever size. 
-        return: [Loss] (A single value)
-        '''
-        N = logits.size(-1)
-        return self.cost(logits.view(-1, N), label.view(-1))
-
-    def accuracy(self, pred, label):
-        '''
-        pred: Prediction results with whatever size
-        label: Label with whatever size
-        return: [Accuracy] (A single value)
-        '''
-        return torch.mean((pred.view(-1) == label.view(-1)).type(torch.FloatTensor))
-
 class IEFramework:
 
     def __init__(self, train_data_loader, val_data_loader, test_data_loader):
@@ -106,24 +67,8 @@ class IEFramework:
               bert_optim=False,
               warmup=True,
               warmup_step=300,
-              grad_iter=1,
               ):
-        '''
-        model: a FewShotREModel instance
-        model_name: Name of the model
-        B: Batch size
-        N: Num of classes for each batch
-        K: Num of instances for each class in the support set
-        Q: Num of instances for each class in the query set
-        ckpt_dir: Directory of checkpoints
-        learning_rate: Initial learning rate
-        lr_step_size: Decay learning rate every lr_step_size steps
-        weight_decay: Rate of decaying weight
-        train_iter: Num of iterations of training
-        val_iter: Num of iterations of validating
-        val_step: Validate every val_step steps
-        test_iter: Num of iterations of testing
-        '''
+        
         print("Start training...")
     
         # Init
@@ -160,60 +105,64 @@ class IEFramework:
         model.train()
      
         # Training
-        best_acc = 0
-        not_best_count = 0 # Stop training after several epochs without improvement.
-        iter_loss = 0.0
-        iter_loss_dis = 0.0
-        iter_right = 0.0
-        iter_right_dis = 0.0
-        iter_sample = 0.0
+        best_ner_f1 = 0
+        best_relation_f1 = 0
+        patient = 0 # Stop training after several epochs without improvement.
+
         for it in range(start_iter, start_iter + train_iter):
             
             tokens_b, mask, converted_spans_b, span_mask, ner_labels_b, relation_indices_b, relation_mask, relation_labels_b = next(self.train_data_loader)
             
-            loss  = model(tokens_b, mask, converted_spans_b, span_mask, ner_labels_b, relation_indices_b, relation_mask, relation_labels_b)
+            output_dict  = model(tokens_b, mask, converted_spans_b, span_mask, ner_labels_b, relation_indices_b, relation_mask, relation_labels_b)
 
-            loss = model.loss(logits, label) / float(grad_iter)
-            right = model.accuracy(pred, label)
-            
+            loss = output_dict['loss']
             loss.backward()
+
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
             
-            if it % grad_iter == 0:
-                optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad()
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad()
+
+
+            ner_results = output_dict['span_metrics']
+            relation_results = output_dict['span_pair_metrics']
             
-            iter_loss += self.item(loss.data)
-            iter_right += self.item(right.data)
-            iter_sample += 1
+            ner_acc = ner_results[0].get_metric()
+            ner_prf = ner_results[1].get_metric()
+            ner_prf_b = ner_results[2].get_metric()
+
+            relation_acc = relation_results[0].get_metric()
+            relation_prf = relation_results[1].get_metric()
+            relation_prf_b = relation_results[2].get_metric()
+         
             
-            sys.stdout.write('step: {0:4} | loss: {1:2.6f}, accuracy: {2:3.2f}%'.format(it + 1, iter_loss / iter_sample, 100 * iter_right / iter_sample) +'\r')
+            sys.stdout.write('step: {0:4} | loss: {1:2.6f},  NER_acc: {2:3.2f},  RE_acc: {3:3.2f}%'.format(it + 1, loss, 100 * ner_acc, 100 * relation_acc) +'\r')
+            sys.stdout.write('NER \t F1 \t Precision \t Recall %')
+            sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(ner_prf['f'], ner_prf['p'], ner_prf['r']) +'\r')
+            sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(ner_prf_b['f'], ner_prf_b['p'], ner_prf_b['r']) +'\r')
+            sys.stdout.write('Relation \t F1 \t Precision \t Recall %')
+            sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(relation_prf['f'], relation_prf['p'], relation_prf['r']) +'\r')
+            sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(relation_prf_b['f'], relation_prf_b['p'], relation_prf_b['r']) +'\r')
             sys.stdout.flush()
 
             if (it + 1) % val_step == 0:
-                acc = self.eval(model, B, N_for_eval, K, Q, val_iter, 
-                        na_rate=na_rate, pair=pair)
+                model.metric_reset()
+                ner_f1, relation_f1 = self.eval(model, val_iter)
                 model.train()
-                if acc > best_acc:
+                if ner_f1 > best_ner_f1 or relation_f1 > best_relation_f1:
                     print('Best checkpoint')
                     torch.save({'state_dict': model.state_dict()}, save_ckpt)
-                    best_acc = acc
-                iter_loss = 0.
-                iter_loss_dis = 0.
-                iter_right = 0.
-                iter_right_dis = 0.
-                iter_sample = 0.
-                
+                    best_ner_f1 = ner_f1
+                    best_relation_f1 = relation_f1
+                model.metric_reset()
+        model.metric_reset()
         print("\n####################\n")
         print("Finish training " + model_name)
 
     def eval(self,
             model,
-            B, N, K, Q,
             eval_iter,
-            na_rate=0,
-            pair=False,
             ckpt=None): 
         '''
         model: a FewShotREModel instance
@@ -239,32 +188,35 @@ class IEFramework:
                 own_state[name].copy_(param)
             eval_dataset = self.test_data_loader
 
-        iter_right = 0.0
-        iter_sample = 0.0
         with torch.no_grad():
             for it in range(eval_iter):
-                if pair:
-                    batch, label = next(eval_dataset)
-                    if torch.cuda.is_available():
-                        for k in batch:
-                            batch[k] = batch[k].cuda()
-                        label = label.cuda()
-                    logits, pred = model(batch, N, K, Q * N + Q * na_rate)
-                else:
-                    support, query, label = next(eval_dataset)
-                    if torch.cuda.is_available():
-                        for k in support:
-                            support[k] = support[k].cuda()
-                        for k in query:
-                            query[k] = query[k].cuda()
-                        label = label.cuda()
-                    logits, pred = model(support, query, N, K, Q * N + Q * na_rate)
+                
+                tokens_b, mask, converted_spans_b, span_mask, ner_labels_b, relation_indices_b, relation_mask, relation_labels_b = next(self.train_data_loader)
+            
+                output_dict  = model(tokens_b, mask, converted_spans_b, span_mask, 
+                                    ner_labels_b, relation_indices_b, relation_mask, relation_labels_b)
 
-                right = model.accuracy(pred, label)
-                iter_right += self.item(right.data)
-                iter_sample += 1
+                loss = output_dict['loss']
 
-                sys.stdout.write('[EVAL] step: {0:4} | accuracy: {1:3.2f}%'.format(it + 1, 100 * iter_right / iter_sample) +'\r')
+                ner_results = output_dict['span_metrics']
+                relation_results = output_dict['span_pair_metrics']
+                
+                ner_acc = ner_results[0].get_metric()
+                ner_prf = ner_results[1].get_metric()
+                ner_prf_b = ner_results[2].get_metric()
+
+                relation_acc = relation_results[0].get_metric()
+                relation_prf = relation_results[1].get_metric()
+                relation_prf_b = relation_results[2].get_metric()
+
+                sys.stdout.write('step: {0:4} | loss: {1:2.6f},  NER_acc: {2:3.2f},  RE_acc: {3:3.2f}%'.format(it + 1, loss, 100 * ner_acc, 100 * relation_acc) +'\r')
+                sys.stdout.write('NER \t F1 \t Precision \t Recall')
+                sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(ner_prf['f'], ner_prf['p'], ner_prf['r']) +'\r')
+                sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(ner_prf_b['f'], ner_prf_b['p'], ner_prf_b['r']) +'\r')
+                sys.stdout.write('Relation \t F1 \t Precision \t Recall')
+                sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(relation_prf['f'], relation_prf['p'], relation_prf['r']) +'\r')
+                sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(relation_prf_b['f'], relation_prf_b['p'], relation_prf_b['r']) +'\r')
                 sys.stdout.flush()
+                
             print("")
-        return iter_right / iter_sample
+        return ner_prf['f'], relation_prf['f']

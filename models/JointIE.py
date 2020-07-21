@@ -5,13 +5,13 @@ import numpy as np
 import math
 from models.modules import EndpointSpanExtractor, SelfAttentiveSpanExtractor, FeedForward, \
                         flatten_and_batch_shift_indices, batched_index_select, SpanPairPairedLayer
-from fewshot_re_kit.categorical_accuracy import MyCategoricalAccuracy
-from fewshot_re_kit.precision_recall_f1 import PrecisionRecallF1
+from joint_ie_kit.categorical_accuracy import CategoricalAccuracy
+from joint_ie_kit.precision_recall_f1 import PrecisionRecallF1
 from collections import defaultdict
 from copy import deepcopy
-import fewshot_re_kit
+import joint_ie_kit
 
-class JointIE(fewshot_re_kit.framework.IEModel):
+class JointIE(nn.Module):
     def __init__(self, 
                 sentence_encoder, 
                 hidden_size, 
@@ -20,6 +20,7 @@ class JointIE(fewshot_re_kit.framework.IEModel):
                 re_label,
                 context_layer, 
                 context_dropout=0.3,
+                dropout = 0.3,
                 span_repr_combination = 'x,y',
                 max_span_width = 5,
                 span_width_embedding_dim = 64,
@@ -52,20 +53,20 @@ class JointIE(fewshot_re_kit.framework.IEModel):
 
         ## span pair
         re_label_num = re_label.get_num()
-        dim_reduce_layer = FeedForward(span_emb_dim, num_layers = 1, hidden_dim = 512)
-        repr_layer = FeedForward(512 * 3 + 64, num_layers = 2, hidden_dim = hidden_size)
+        dim_reduce_layer = FeedForward(span_emb_dim, num_layers = 1, hidden_dim = hidden_size)
+        repr_layer = FeedForward(hidden_size * 3 + span_width_embedding_dim, num_layers = 2, hidden_dim = hidden_size)
         self.span_pair_layer = SpanPairPairedLayer(dim_reduce_layer, repr_layer)
         self.span_pair_proj_label = nn.Linear(hidden_size, re_label_num)
 
         ## metrics
         # ner
-        self.ner_acc = MyCategoricalAccuracy(top_k=1, tie_break=False)
+        self.ner_acc = CategoricalAccuracy(top_k=1, tie_break=False)
         self.ner_prf = PrecisionRecallF1(neg_label=self.ner_neg_id)
         self.ner_prf_b = PrecisionRecallF1(neg_label=self.ner_neg_id, binary_match=True)
 
         # relation
 
-        self.re_acc = MyCategoricalAccuracy(top_k=1, tie_break=False)
+        self.re_acc = CategoricalAccuracy(top_k=1, tie_break=False)
         self.re_prf = PrecisionRecallF1(neg_label=self.re_neg_id)
         self.re_prf_b = PrecisionRecallF1(neg_label=self.re_neg_id, binary_match=True)
 
@@ -240,9 +241,17 @@ class JointIE(fewshot_re_kit.framework.IEModel):
 
         ## output dict
 
-        
+        output_dict = {
+            'loss': loss,
+            'span_loss': span_loss,
+            'span_pred': span_pred,
+            'span_metrics': [self.ner_acc, self.ner_prf, self.ner_prf_b],
+            'span_pair_loss': span_pair_loss,
+            'span_pair_pred': span_pair_pred,
+            'span_pair_metrics':[self.ner_acc, self.ner_prf, self.ner_prf_b]
+        }
 
-        return loss
+        return output_dict
 
     def prob_mask(self,
                   prob: torch.FloatTensor,
@@ -426,6 +435,16 @@ class JointIE(fewshot_re_kit.framework.IEModel):
                 labels.append(assign_label)
             span_pair_labels.append(labels)
         return torch.LongTensor(span_pair_labels).to(device)
+    
+    def metric_reset(self):
+
+        self.ner_acc.reset()
+        self.ner_prf.reset()
+        self.ner_prf_b.reset()
+
+        self.re_acc.reset()
+        self.re_prf.reset()
+        self.re_prf_b.reset()
 
 
 def sequence_cross_entropy_with_logits(logits: torch.FloatTensor,

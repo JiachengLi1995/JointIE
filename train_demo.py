@@ -1,9 +1,8 @@
-from fewshot_re_kit.data_loader import get_loader
-from fewshot_re_kit.framework import IEFramework
-from fewshot_re_kit.sentence_encoder import BERTSentenceEncoder
-from fewshot_re_kit.utils import LabelField
+from joint_ie_kit.data_loader import get_loader
+from joint_ie_kit.framework import IEFramework
+from joint_ie_kit.sentence_encoder import BERTSentenceEncoder
+from joint_ie_kit.utils import LabelField
 import models
-from models.proto import Proto
 from models.JointIE import JointIE
 import sys
 import torch
@@ -47,8 +46,16 @@ def main():
            help='hidden size')
     parser.add_argument('--context_layer', default=3, type=int,
            help='number of contextual layers')
-    parser.add_argument('--context_dropout', default=0, type=int,
+    parser.add_argument('--context_dropout', default=0.3, type=int,
            help='dropout rate in the contextual layer')
+    parser.add_argument('--dropout', default=0.3, type=float,
+           help='dropout rate')
+    parser.add_argument('--span_width_dim', default=64, type=int,
+           help='dimension of embedding for span width')
+    parser.add_argument('--spans_per_word', default=0.6, type=float,
+           help='thershold number of spans in each sentence')
+    parser.add_argument('--e2e', default=True, type=bool,
+           help='End2End: if use gold relation index when training')
 
     ## Train
     parser.add_argument('--batch_size', default=4, type=int,
@@ -61,14 +68,10 @@ def main():
             help='num of iters in testing')
     parser.add_argument('--val_step', default=2000, type=int,
            help='val after training how many iters')
-    parser.add_argument('--lr', default=1e-1, type=float,
+    parser.add_argument('--lr', default=1e-5, type=float,
            help='learning rate')
     parser.add_argument('--weight_decay', default=1e-5, type=float,
            help='weight decay')
-    parser.add_argument('--dropout', default=0.0, type=float,
-           help='dropout rate')
-    parser.add_argument('--grad_iter', default=1, type=int,
-           help='accumulate gradient every x iterations')
     parser.add_argument('--optim', default='adamw',
            help='sgd / adam / adamw')
     parser.add_argument('--load_ckpt', default=None,
@@ -100,9 +103,6 @@ def main():
     
     root = os.path.join(opt.root, opt.dataset)
     train_data_loader = get_loader(root, opt.train, sentence_encoder, batch_size, ner_label, re_label, max_span_width=opt.max_span_width)
-    for i in range(10):
-        print(next(train_data_loader))
-    exit(0)
     val_data_loader = get_loader(root, opt.val, sentence_encoder, batch_size, ner_label, re_label, max_span_width=opt.max_span_width)
     test_data_loader = get_loader(root, opt.test, sentence_encoder, batch_size, ner_label, re_label, max_span_width=opt.max_span_width)
 
@@ -120,11 +120,11 @@ def main():
         
     prefix = '-'.join([model_name, encoder_name, opt.train, opt.val])
     
-    
-    if model_name == 'Proto':
-        model = Proto(sentence_encoder, dot=opt.dot)
-    elif model_name == 'JointIE':
-        model = JointIE(sentence_encoder, opt.hidden_size, opt.embedding_size, ner_label, re_label, opt.context_layer, opt.context_dropout)
+    if model_name == 'JointIE':
+        model = JointIE(sentence_encoder, opt.hidden_size, opt.embedding_size, ner_label, 
+                        re_label, opt.context_layer, opt.context_dropout, opt.dropout,
+                        max_span_width=opt.max_span_width, span_width_embedding_dim=opt.span_width_dim,
+                        spans_per_word=opt.spans_per_word, e2e=opt.e2e)
     else:
         raise NotImplementedError
     
@@ -143,15 +143,15 @@ def main():
         else:
             bert_optim = False
 
-        framework.train(model, prefix, batch_size, trainN, N, K, Q,
+        framework.train(model, prefix, learning_rate=opt.lr,
                 pytorch_optim=pytorch_optim, load_ckpt=opt.load_ckpt, save_ckpt=ckpt,
-                na_rate=opt.na_rate, val_step=opt.val_step, fp16=opt.fp16, pair=opt.pair, 
+                val_step=opt.val_step, 
                 train_iter=opt.train_iter, val_iter=opt.val_iter, bert_optim=bert_optim)
     else:
         ckpt = opt.load_ckpt
 
-    acc = framework.eval(model, batch_size, N, K, Q, opt.test_iter, na_rate=opt.na_rate, ckpt=ckpt, pair=opt.pair)
-    print("RESULT: %.2f" % (acc * 100))
+    ner_f1, relation_f1 = framework.eval(model, opt.test_iter, ckpt=ckpt)
+    print("RESULT: NER F1: {0:2.4f},  Relation F1: {1:2.4f}".format(ner_f1, relation_f1))
 
 if __name__ == "__main__":
     main()
