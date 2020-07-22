@@ -5,6 +5,7 @@ import numpy as np
 import random
 import json
 import warnings
+from copy import deepcopy
 
 class MissingDict(dict):
     """
@@ -181,14 +182,14 @@ class DataLoader(data.Dataset):
     def __getitem__(self, index):
         
         index = random.randint(0, len(self.data)-1)
-        sentence, spans, ner_labels, relation_indices, relation_labels = self.data[index]
-        
+
+        sentence, spans, ner_labels, relation_indices, relation_labels = deepcopy(self.data[index])
+
         tokens, idx_dict = self.encoder.tokenize(sentence)
         
         converted_spans = []
         for span in spans:
             converted_spans.append(self.convert_span(span, idx_dict))
-        
         
         return [tokens, converted_spans, ner_labels, relation_indices, relation_labels]
 
