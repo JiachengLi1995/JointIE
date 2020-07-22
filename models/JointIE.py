@@ -106,7 +106,7 @@ class JointIE(nn.Module):
             top_mask = span_prob[:, :, self.ner_neg_id] <= -top_v  #(batch_size, span_num)
             span_mask_subset = span_mask * (top_mask | ner_labels.ne(self.ner_neg_id)).float()
 
-        if not self.training:
+        else:
                 
             span_mask_subset = span_mask
 

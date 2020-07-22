@@ -251,16 +251,6 @@ class DataLoader(data.Dataset):
         ##relation mask (both indix are 0, then should be masked)
         relation_mask = torch.logical_and(relation_indices_b[:,:,0].eq(0), relation_indices_b[:,:,1].eq(0)).eq(0).float()
 
-        if torch.cuda.is_available():
-            tokens_b = tokens_b.cuda()  # (batch_size, length)
-            mask = mask.cuda()          # (batch_size, length)
-            converted_spans_b = converted_spans_b.cuda() # (batch_size, span_num, 2)
-            span_mask = span_mask.cuda()                 # (batch_size, span_num)
-            ner_labels_b = ner_labels_b.cuda()           # (batch_size, span_num)
-            relation_indices_b = relation_indices_b.cuda() # (batch_size, span_pair_num, 2)
-            relation_mask = relation_mask.cuda()           # (batch_size, span_pair_num)
-            relation_labels_b = relation_labels_b.cuda()   # (batch_size, span_pair_num)
-
         return tokens_b, mask, converted_spans_b, span_mask, ner_labels_b, relation_indices_b, relation_mask, relation_labels_b
 
 def get_loader(root, filename, encoder, batch_size, ner_label, re_label, max_span_width=5, context_width=1):

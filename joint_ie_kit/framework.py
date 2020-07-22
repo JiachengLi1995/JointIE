@@ -110,7 +110,16 @@ class IEFramework:
         for it in range(start_iter, start_iter + train_iter):
             
             tokens_b, mask, converted_spans_b, span_mask, ner_labels_b, relation_indices_b, relation_mask, relation_labels_b = next(self.train_data_loader)
-            
+            if torch.cuda.is_available():
+                tokens_b = tokens_b.cuda()  # (batch_size, length)
+                mask = mask.cuda()          # (batch_size, length)
+                converted_spans_b = converted_spans_b.cuda() # (batch_size, span_num, 2)
+                span_mask = span_mask.cuda()                 # (batch_size, span_num)
+                ner_labels_b = ner_labels_b.cuda()           # (batch_size, span_num)
+                relation_indices_b = relation_indices_b.cuda() # (batch_size, span_pair_num, 2)
+                relation_mask = relation_mask.cuda()           # (batch_size, span_pair_num)
+                relation_labels_b = relation_labels_b.cuda()   # (batch_size, span_pair_num)
+
             output_dict  = model(tokens_b, mask, converted_spans_b, span_mask, ner_labels_b, relation_indices_b, relation_mask, relation_labels_b)
 
             loss = output_dict['loss']
@@ -190,7 +199,17 @@ class IEFramework:
             for it in range(eval_iter):
                 
                 tokens_b, mask, converted_spans_b, span_mask, ner_labels_b, relation_indices_b, relation_mask, relation_labels_b = next(self.train_data_loader)
-            
+
+                if torch.cuda.is_available():
+                    tokens_b = tokens_b.cuda()  # (batch_size, length)
+                    mask = mask.cuda()          # (batch_size, length)
+                    converted_spans_b = converted_spans_b.cuda() # (batch_size, span_num, 2)
+                    span_mask = span_mask.cuda()                 # (batch_size, span_num)
+                    ner_labels_b = ner_labels_b.cuda()           # (batch_size, span_num)
+                    relation_indices_b = relation_indices_b.cuda() # (batch_size, span_pair_num, 2)
+                    relation_mask = relation_mask.cuda()           # (batch_size, span_pair_num)
+                    relation_labels_b = relation_labels_b.cuda()   # (batch_size, span_pair_num)
+                    
                 output_dict  = model(tokens_b, mask, converted_spans_b, span_mask, 
                                     ner_labels_b, relation_indices_b, relation_mask, relation_labels_b)
 
