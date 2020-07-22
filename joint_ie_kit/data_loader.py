@@ -176,9 +176,11 @@ class DataLoader(data.Dataset):
 
 
     def __len__(self):
-        return len(self.data)
+        return 1000000000
 
     def __getitem__(self, index):
+
+        index = random.randint(0, len(self.data)-1)
         
         sentence, spans, ner_labels, relation_indices, relation_labels = self.data[index]
         
