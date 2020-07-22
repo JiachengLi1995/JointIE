@@ -135,13 +135,13 @@ class IEFramework:
             ner_results = output_dict['span_metrics']
             relation_results = output_dict['span_pair_metrics']
             
-            ner_acc = ner_results[0].get_metric()
-            ner_prf = ner_results[1].get_metric()
-            ner_prf_b = ner_results[2].get_metric()
+            ner_acc = ner_results[0].get_metric(True)
+            ner_prf = ner_results[1].get_metric(True)
+            ner_prf_b = ner_results[2].get_metric(True)
 
-            relation_acc = relation_results[0].get_metric()
-            relation_prf = relation_results[1].get_metric()
-            relation_prf_b = relation_results[2].get_metric()
+            relation_acc = relation_results[0].get_metric(True)
+            relation_prf = relation_results[1].get_metric(True)
+            relation_prf_b = relation_results[2].get_metric(True)
          
             
             sys.stdout.write('step: {0:4} | loss: {1:2.6f},  NER_acc: {2:3.2f}%,  RE_acc: {3:3.2f}%'.format(it + 1, loss, 100 * ner_acc, 100 * relation_acc) +'\n')
@@ -154,7 +154,7 @@ class IEFramework:
             sys.stdout.flush()
 
             if (it + 1) % val_step == 0:
-                model.metric_reset()
+                #model.metric_reset()
                 ner_f1, relation_f1 = self.eval(model, val_iter)
                 model.train()
                 if ner_f1 > best_ner_f1 or relation_f1 > best_relation_f1:
@@ -162,8 +162,8 @@ class IEFramework:
                     torch.save({'state_dict': model.state_dict()}, save_ckpt)
                     best_ner_f1 = ner_f1
                     best_relation_f1 = relation_f1
-                model.metric_reset()
-        model.metric_reset()
+                #model.metric_reset()
+        #model.metric_reset()
         print("\n####################\n")
         print("Finish training " + model_name)
 
@@ -218,21 +218,21 @@ class IEFramework:
                 ner_results = output_dict['span_metrics']
                 relation_results = output_dict['span_pair_metrics']
                 
-                ner_acc = ner_results[0].get_metric()
-                ner_prf = ner_results[1].get_metric()
-                ner_prf_b = ner_results[2].get_metric()
+                ner_acc = ner_results[0].get_metric(True)
+                ner_prf = ner_results[1].get_metric(True)
+                ner_prf_b = ner_results[2].get_metric(True)
 
-                relation_acc = relation_results[0].get_metric()
-                relation_prf = relation_results[1].get_metric()
-                relation_prf_b = relation_results[2].get_metric()
+                relation_acc = relation_results[0].get_metric(True)
+                relation_prf = relation_results[1].get_metric(True)
+                relation_prf_b = relation_results[2].get_metric(True)
 
                 sys.stdout.write('step: {0:4} | loss: {1:2.6f},  NER_acc: {2:3.2f}%,  RE_acc: {3:3.2f}%'.format(it + 1, loss, 100 * ner_acc, 100 * relation_acc) +'\n')
                 sys.stdout.write('NER \t F1 \t Precision \t Recall \n')
                 sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} '.format(ner_prf['f'], ner_prf['p'], ner_prf['r']) +'\n')
                 sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f}'.format(ner_prf_b['f'], ner_prf_b['p'], ner_prf_b['r']) +'\n')
                 sys.stdout.write('Relation \t F1 \t Precision \t Recall \n')
-                sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(relation_prf['f'], relation_prf['p'], relation_prf['r']) +'\n')
-                sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} %'.format(relation_prf_b['f'], relation_prf_b['p'], relation_prf_b['r']) +'\n')
+                sys.stdout.write('prf \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} '.format(relation_prf['f'], relation_prf['p'], relation_prf['r']) +'\n')
+                sys.stdout.write('prf_b \t {0:2.4f} \t {1:2.4f} \t {2:2.4f} '.format(relation_prf_b['f'], relation_prf_b['p'], relation_prf_b['r']) +'\n')
                 sys.stdout.flush()
                 
             print("")
