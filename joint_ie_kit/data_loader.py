@@ -176,12 +176,11 @@ class DataLoader(data.Dataset):
 
 
     def __len__(self):
-        return 1000000000
+        return 100000000
 
     def __getitem__(self, index):
-
-        index = random.randint(0, len(self.data)-1)
         
+        index = random.randint(0, len(self.data)-1)
         sentence, spans, ner_labels, relation_indices, relation_labels = self.data[index]
         
         tokens, idx_dict = self.encoder.tokenize(sentence)
@@ -260,7 +259,7 @@ def get_loader(root, filename, encoder, batch_size, ner_label, re_label, max_spa
     dataset = DataLoader(root, filename, encoder, batch_size, ner_label, re_label, max_span_width=5, context_width=1)
     data_loader = data.DataLoader(dataset=dataset,
             batch_size=batch_size,
-            shuffle=True,
+            shuffle=False,
             pin_memory=True,
             num_workers=4,
             collate_fn=dataset.collate_fn)
