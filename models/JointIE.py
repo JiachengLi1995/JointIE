@@ -42,7 +42,7 @@ class JointIE(nn.Module):
         ## span predictioin layer
         span_emb_dim = self.endpoint_span_extractor.get_output_dim() + self.attentive_span_extractor.get_output_dim()
         ner_label_num = ner_label.get_num()
-        self.span_layer = FeedForward(input_dim = span_emb_dim, num_layers=2, hidden_dim=hidden_size, dropout=context_dropout)
+        self.span_layer = FeedForward(input_dim = span_emb_dim, num_layers=2, hidden_dim=hidden_size, dropout=dropout)
         self.span_proj_label = nn.Linear(hidden_size, ner_label_num)
 
         self.spans_per_word = spans_per_word
@@ -54,9 +54,9 @@ class JointIE(nn.Module):
         ## span pair
         re_label_num = re_label.get_num()
         dim_reduce_layer = FeedForward(span_emb_dim, num_layers = 1, hidden_dim = hidden_size)
-        repr_layer = FeedForward(hidden_size * 3 + span_width_embedding_dim, num_layers = 2, hidden_dim = hidden_size)
+        repr_layer = FeedForward(hidden_size * 3 + span_width_embedding_dim, num_layers = 2, hidden_dim = hidden_size//4)
         self.span_pair_layer = SpanPairPairedLayer(dim_reduce_layer, repr_layer)
-        self.span_pair_label_proj = nn.Linear(hidden_size, re_label_num)
+        self.span_pair_label_proj = nn.Linear(hidden_size//4, re_label_num)
 
         ## metrics
         # ner
@@ -128,7 +128,7 @@ class JointIE(nn.Module):
 
         if not self.e2e:
             # use provided span pairs to construct embedding
-
+            span_pair_mask = relation_mask
             # get span pair embedding
             # SHAPE: (batch_size * num_span_pairs * 2)
             flat_span_pairs = flatten_and_batch_shift_indices(relation_indices, spans_num)

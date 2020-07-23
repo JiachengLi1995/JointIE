@@ -151,9 +151,9 @@ class DataLoader(data.Dataset):
             if spans[i] in span_ner_labels and spans[j] in span_ner_labels:
                 span_pair = (spans[i], spans[j])
                 relation_label = relation_dict[span_pair]
-                
-                relation_indices.append((i, j))
-                relation_labels.append(self.re_label.get_id(relation_label))
+                if relation_label:
+                    relation_indices.append((i, j))
+                    relation_labels.append(self.re_label.get_id(relation_label))
         
         # Add negative re label
         self.re_label.get_id("")

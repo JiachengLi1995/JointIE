@@ -27,7 +27,7 @@ def main():
             help='dataset')
 
     ## span
-    parser.add_argument('--max_span_width', default=5, type=int,
+    parser.add_argument('--max_span_width', default=8, type=int,
             help='max number of word in a span')
     
 
@@ -42,11 +42,11 @@ def main():
             help='model name')
     parser.add_argument('--encoder', default='bert',
             help='encoder: cnn or bert or roberta')
-    parser.add_argument('--hidden_size', default=256, type=int,
+    parser.add_argument('--hidden_size', default=512, type=int,
            help='hidden size')
-    parser.add_argument('--context_layer', default=3, type=int,
+    parser.add_argument('--context_layer', default=1, type=int,
            help='number of contextual layers')
-    parser.add_argument('--context_dropout', default=0.3, type=int,
+    parser.add_argument('--context_dropout', default=0, type=int,
            help='dropout rate in the contextual layer')
     parser.add_argument('--dropout', default=0.3, type=float,
            help='dropout rate')
@@ -54,21 +54,21 @@ def main():
            help='dimension of embedding for span width')
     parser.add_argument('--spans_per_word', default=0.6, type=float,
            help='thershold number of spans in each sentence')
-    parser.add_argument('--e2e', default=True, type=bool,
-           help='End2End: if use gold relation index when training')
+    parser.add_argument('--e2e', default=True, action='store_false',
+           help='Do not use End2Eng. End2End: if use gold relation index when training')
 
     ## Train
-    parser.add_argument('--batch_size', default=4, type=int,
+    parser.add_argument('--batch_size', default=32, type=int,
             help='batch size')
-    parser.add_argument('--train_iter', default=30000, type=int,
+    parser.add_argument('--train_iter', default=20000, type=int,
             help='num of iters in training')
     parser.add_argument('--val_iter', default=1000, type=int,
             help='num of iters in validation')
-    parser.add_argument('--test_iter', default=10000, type=int,
+    parser.add_argument('--test_iter', default=1000, type=int,
             help='num of iters in testing')
     parser.add_argument('--val_step', default=2000, type=int,
            help='val after training how many iters')
-    parser.add_argument('--lr', default=1e-5, type=float,
+    parser.add_argument('--lr', default=5e-5, type=float,
            help='learning rate')
     parser.add_argument('--weight_decay', default=1e-5, type=float,
            help='weight decay')
