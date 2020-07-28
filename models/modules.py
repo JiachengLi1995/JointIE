@@ -632,7 +632,6 @@ def batched_span_select(target: torch.Tensor, spans: torch.LongTensor) -> torch.
     # of a given span is smaller than the max, the rest of the values
     # are masked.
     max_batch_span_width = span_widths.max().item() + 1
-
     # Shape: (1, 1, max_batch_span_width)
     max_span_range_indices = get_range_vector(max_batch_span_width, get_device_of(target)).view(
         1, 1, -1

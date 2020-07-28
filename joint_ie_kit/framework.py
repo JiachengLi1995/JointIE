@@ -119,9 +119,14 @@ class IEFramework:
                 relation_indices_b = relation_indices_b.cuda() # (batch_size, span_pair_num, 2)
                 relation_mask = relation_mask.cuda()           # (batch_size, span_pair_num)
                 relation_labels_b = relation_labels_b.cuda()   # (batch_size, span_pair_num)
-
+            # try:
             output_dict  = model(tokens_b, mask, converted_spans_b, span_mask, ner_labels_b, relation_indices_b, relation_mask, relation_labels_b)
-
+            # except:
+            #     for i in range(tokens_b.size(0)):
+            #         print(tokens_b[i])
+            #         print(converted_spans_b[i])
+            #         print(relation_indices_b[i])
+            #     assert 0
             loss = output_dict['loss']
             loss.backward()
 

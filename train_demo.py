@@ -58,7 +58,7 @@ def main():
            help='Do not use End2Eng. End2End: if use gold relation index when training')
 
     ## Train
-    parser.add_argument('--batch_size', default=32, type=int,
+    parser.add_argument('--batch_size', default=16, type=int,
             help='batch size')
     parser.add_argument('--train_iter', default=20000, type=int,
             help='num of iters in training')

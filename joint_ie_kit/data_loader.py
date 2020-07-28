@@ -190,7 +190,7 @@ class DataLoader(data.Dataset):
         converted_spans = []
         for span in spans:
             converted_spans.append(self.convert_span(span, idx_dict))
-        
+             
         return [tokens, converted_spans, ner_labels, relation_indices, relation_labels]
 
     
