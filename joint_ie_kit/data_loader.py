@@ -257,7 +257,7 @@ class DataLoader(data.Dataset):
 
 def get_loader(root, filename, encoder, batch_size, ner_label, re_label, max_span_width=5, context_width=1):
 
-    dataset = DataLoader(root, filename, encoder, batch_size, ner_label, re_label, max_span_width=5, context_width=1)
+    dataset = DataLoader(root, filename, encoder, batch_size, ner_label, re_label, max_span_width=max_span_width, context_width=context_width)
     data_loader = data.DataLoader(dataset=dataset,
             batch_size=batch_size,
             shuffle=False,
