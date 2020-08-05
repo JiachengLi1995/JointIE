@@ -20,13 +20,13 @@ transformers==2.11.0
 
 5 datasets are preprocessed and included in this repository.
 
-| Dataset             | Task code     | Dir                      |
-|---------------------|---------------|--------------------------|
-| Wet Lab Protocols   | wlp           | data/wlp                 |
-| SciERC              | scierc        | data/scierc              |
-| NYT24               | nyt24         | data/nyt24               |
-| NYT29               | nyt29         | data/nyt29               |
-| WebNLG              | webnlg        | data/webnlg              |
+| Dataset             | Task code     | Dir                      | Source   |
+|---------------------|---------------|--------------------------|----------|
+| Wet Lab Protocols   | wlp           | data/wlp                 | [link](https://github.com/chaitanya2334/WLP-Dataset)|
+| SciERC              | scierc        | data/scierc              | [link](http://nlp.cs.washington.edu/sciIE/)|
+| NYT24               | nyt24         | data/nyt24               | [link](https://drive.google.com/drive/folders/1RPD9kuHUHp4O3gQLLD1CgDPigAlRiR7L)|
+| NYT29               | nyt29         | data/nyt29               | [link](https://drive.google.com/drive/folders/1RPD9kuHUHp4O3gQLLD1CgDPigAlRiR7L)|
+| WebNLG              | webnlg        | data/webnlg              | [link](https://drive.google.com/file/d/1zISxYa-8ROe2Zv8iRc82jY9QsQrfY1Vj/view)|
 
 
 ## Train and Evaluate Models
